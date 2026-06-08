@@ -14,22 +14,6 @@ This repository contains:
 > + `ns` application records). The framebuffer UI and several non-install features are not reimplemented.
 > See [`docs/STATUS.md`](docs/STATUS.md) for the precise state.
 
-## ⚖️ Legal / licensing — read before using or publishing
-
-- **Derivative-work risk.** DBI is **closed-source freeware** (author: *rashevskyv*). This project was
-  produced by reverse-engineering it. Even though the code here is written clean-room *from behavioral
-  specs* (not copied from decompiled output), publishing a reimplementation of someone else's
-  closed-source software without permission is a real copyright risk. **Resolve this** (e.g. obtain the
-  original author's permission) before treating this as freely licensed. The repo ships **no upstream
-  DBI files** (binary, manual, host script, config are all git-ignored).
-- **Content protection.** The NCA crypto here uses **user-supplied `prod.keys`** to read content you
-  own, the same as established open tools (hactool/nstool/Goldleaf). No keys are included or distributed.
-- **Intended use.** This is homebrew tooling for managing **content you are legally entitled to** (your
-  own dumps, homebrew, forwarders). Don't use it to obtain or distribute copyrighted games.
-
-A `LICENSE` is intentionally left for you to choose once the points above are resolved — see
-[`docs/STATUS.md`](docs/STATUS.md) §1.
-
 ## Build
 
 ```sh

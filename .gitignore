@@ -1,0 +1,61 @@
+# ============================================================================
+#  Upstream / copyrighted inputs — NEVER commit (not ours to redistribute)
+# ============================================================================
+DBI.nro
+# the original DBI user manual (rashevskyv)
+README.dbi-upstream.md
+# upstream DBI PC host script
+dbibackend
+# upstream sample config
+dbi.config
+*.nro
+*.nso
+
+# Switch content / dumps
+*.nsp
+*.nsz
+*.xci
+*.xcz
+*.nca
+*.ncz
+*.tik
+*.cert
+
+# Console keys — NEVER commit
+*.keys
+prod.keys
+title.keys
+keys.txt
+
+# ============================================================================
+#  Reverse-engineering working artifacts (derivative of the closed binary)
+# ============================================================================
+ghidra_projects/
+*.gpr
+*.rep/
+*.lock
+exports/
+decompiled/
+*.c.decomp
+# decompilation-derived symbol map — see README "Clean-room" note before publishing
+# docs/SYMBOLS.md
+
+# ============================================================================
+#  Build output (devkitPro)
+# ============================================================================
+build/
+*.elf
+*.nacp
+*.o
+*.lst
+*.map
+
+# ============================================================================
+#  OS / editor noise
+# ============================================================================
+.DS_Store
+**/.DS_Store
+*.swp
+*~
+.vscode/
+.idea/

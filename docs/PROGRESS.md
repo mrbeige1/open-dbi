@@ -1,0 +1,85 @@
+# RE Progress Dashboard
+
+Quantitative state of the reconstruction. Update as phases advance.
+
+## Function classification (of 9,403 total defined functions)
+
+| Bucket | Count | % | How |
+|--------|------:|--:|-----|
+| Library — FID strict match | 1,182 | 12.6% | devkitA64 FidDb (libnx/libc/libstdc++/libsupc++/libm), 751 uniquely named |
+| Library — string-only hint | 824 | 8.8% | `ExportContext.py` keyword heuristic (libstdc++ etc.) |
+| **Library subtotal** | **2,006** | **21.3%** | |
+| App — recovered & named (`dbi_*`) | 150 | 1.6% | Phase 3 decompile→agent pipeline |
+| Library named (`lib_*` + libnx/std) | 815 | 8.7% | FID + agent-confirmed |
+| **Still `FUN_*` (unknown)** | **8,388** | **89.2%** | version-drifted library + obfuscated-string app code |
+
+> 965 named. **Install pipeline mapped** end-to-end: `dbi_install_run` (5-phase) + `parseContainer`
+> (NSP=PFS0 / XCI=HFS0 → MetaKey RB-tree + content vector) + `resolveContent` (validate
+> ContentMetaKeys vs 0x430 CNMT header; type tags `0x10000..6` = base/update/DLC) + `NcmAccessor`.
+> **Phase 4:** `open-dbi/` builds to a real `.nro` with the **real libnx ncm + es backend**
+> (placeholder/write/register/commit + ImportTicket) and a file/USB `ContentSource`.
+> **Single remaining install blocker = NCA crypto** (`setContentMeta` needs the decrypted CNMT).
+
+> 905 of 9,403 functions are now named in `~/DBI.gpr`. The `dbi_*` set (99) spans ~13 subsystems —
+> see the subsystem map below. (The 824 string-only library hints from the early triage are *not*
+> applied as DB names, so they still count under `FUN_*` here.)
+
+### Subsystems with recovered anchors (batches 1–3, 27 main functions)
+saves (backup/restore/delete/refresh/extend/copy+apply extra-data) · dumps (NSP/PFS0 builder,
+enqueue, exefs, resolve-targets, entry-list) · install/nca (IVFC/RomFS tree, buildCtx) · forwarder
+(shortcut-NSP w/ JPEG icon) · ftp (listing formatter, server start/run) · network (Wi-Fi AP + QR) ·
+mtp (USB responder + container dispatch) · pdm (play-event + Activity Log reports) · config
+(load/apply, getString/getBool) · fs (temp path, register special entries) · ui (dir-listing rows,
+details panel) · log (writeLog, reportSink) · app (application details)
+
+### App-candidate work-list (call-graph proximity to app anchors)
+`SelectAppCandidates.py` found **716 high-confidence app functions** (unknowns that call
+`dbi_globalContext` / `dbi_util_tlsBase` / config getters / Pfs0Builder etc.). This is the prioritized
+recovery queue. Batch 2 recovered the top 4; ~712 remain (plus 2 to redo after a session-limit abort).
+
+### Recovery batches
+- **Batch 1 (12 fns):** saves backup/restore, dump/NSP builder, FTP listing, temp/fs, logging.
+- **Batch 2 (4 of top-8 app candidates):** `dbi_saves_deleteSelectedSaves`, `dbi_net_startAccessPointFtp`
+  (confirms the **QR-code access point** the README omitted), `dbi_forwarder_buildNsp` (new **forwarder**
+  subsystem — builds shortcut NSPs with JPEG icons), `dbi_pdm_buildPlayEventReport` (new **pdm** subsystem
+  — the Activity Log / play-history via `pdmqry*`). +21 callee names applied.
+- **Batch 3 (11 fns):** `dbi_app_buildApplicationDetails`, `dbi_pdm_buildActivityLogReport`,
+  `dbi_mtp_responderRun`, `dbi_fs_registerSpecialEntries`, `dbi_ui_buildDirListingRows`,
+  `dbi_saves_copySaveExtraData`, `dbi_config_loadAndApply`, `dbi_saves_extendSaveFs`,
+  `dbi_nca_buildIvfcLevels`, `dbi_ui_buildDetailsPanel`, `dbi_saves_applySaveExtraData`.
+  98 names merged/applied (15 frags, majority-vote + override resolution).
+- **Resolved earlier conflicts:** `71000f7910`=`dbi_util_formatBytes`; `71005f8500`=`dbi_reportSink_appendString`;
+  `710067ada0`=`dbi_strpool_get` (the obfuscated-pool fetch, 562 callers — high propagation);
+  `710019a180`=`dbi_saves_writeSaveExtraData`. Open tie: `710004f160` (libstdc++ string helper, low value).
+- **Next:** re-run `SelectAppCandidates.py` (app-anchor set grew 99→ propagates), recover next batch.
+  Highest-priority untouched area: the **install / USB-host / gamecard install** path (DBI's core).
+
+### Name conflicts to resolve (two agents disagreed)
+- `71005f8500`: `dbi_log_printf` vs `dbi_reportSink_appendString`
+- `71000f7910`: `dbi_util_formatByteSize` vs `lib_operator_new_array`
+- `710067ada0`: `dbi_i18n_getString` vs `dbi_strpool_getLocalized` (both ~ "localized string fetch")
+
+## Key constraint discovered
+**Toolchain version mismatch.** `DBI.nro` (Nov 2024) was built with **newlib-4.5.0.20241231** + an
+older GCC; the installed devkitA64 is **GCC 15.2.0 / newlib-4.6.0.20260123** (2025–26). FID matching
+needs near-exact code, so library match rate is throttled (~13% of the 5,569-hash corpus matched;
+loose hash-only matching added 0, confirming true code divergence rather than collision). libnx — the
+library DBI bundles itself — matched only ~27% of its corpus.
+
+**Implication:** pure FID subtraction tops out around ~21% here. Closing the gap needs either the
+period-correct toolchain (hard to obtain) or **version-independent** techniques.
+
+## The version-independent lever (next)
+DBI **obfuscates its own string literals** (XOR + bit-rotate via a TLS pool — see `SYMBOLS.md` finding
+#1). This is *why* the string triage only tagged 12 app functions: app code references *encrypted*
+strings. A **static string deobfuscator** (Task 8 / Phase 1.5) will decode the pool and back-annotate
+plaintext; re-running `ExportContext.py` afterward should reclassify a large share of the 7,385
+"unknown" as app (or library), independent of toolchain version. Combined with agent classification on
+the residual, this is the path to separating DBI's own code.
+
+## Artifacts
+- Ghidra project: `~/DBI.gpr` (793 names applied: 42 recovered-app + 751 lib_*)
+- FID corpus: `~/switch-re/fid/libhashes.jsonl` (9,253 functions, 5,569 unique hashes)
+- FID matches: `~/switch-re/fid/matches.csv`
+- Function context/triage: `~/switch-re/exports/functions_context.jsonl`
+- Scripts: `scripts/ghidra/{Inventory,ExportContext,DecompileTargets,ApplyNames,HashLibrary,MatchToDBI}.py`

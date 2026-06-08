@@ -1,0 +1,47 @@
+address,name
+# --- 12 confirmed-app target functions ---
+710060d100,dbi_dump_buildNspDump
+71001535f0,dbi_saves_backupSaveToZip
+7100159d60,dbi_saves_refreshBackupList
+710014e890,dbi_saves_uploadBackupsOverNetwork
+710060ab30,dbi_dump_buildContentDumpPathAndEnqueue
+7100604d20,dbi_dump_buildGamecardDumpPathAndEnqueue
+710018c400,dbi_dump_resolveContentDumpTargets
+71003b3a90,dbi_dump_addExeFsEntriesToDumpJob
+710036d2e0,dbi_dump_buildDumpEntryList
+7100294280,dbi_ftp_formatListingEntry
+71001ae4a0,dbi_fs_TempPathProvider_ctor
+71005f8800,dbi_log_writeLog
+# --- high-propagation shared helpers ---
+7100813700,memcpy_or_M_construct
+7100770f28,dbi_util_tlsBase
+71007b33a0,operator_new_allocate
+71007e6840,std_string_append
+710018a9e0,dbi_globalContext
+7100839460,Mutex_lock
+71008394e0,Mutex_unlock
+71000f6730,std_string_starts_with
+7100054b00,dbi_config_getBool
+71000f6540,std_string_ends_with
+7100057bc0,dbi_config_getString
+71005fdbb0,std_string_assign_range
+71005fe210,std_string_assign_len
+71007e63a0,std_string_reserve
+71001a3420,dbi_system_getCurrentTime
+71001aeed0,dbi_time_nowId
+# --- PFS0/NSP builder family ---
+7100601ed0,Pfs0Builder_ctor
+7100602050,StreamWriter_init
+7100603630,Pfs0Builder_addStreamEntry
+7100602c30,Pfs0Builder_addNcaEntry
+7100603330,Pfs0Builder_addTicketEntry
+710007c720,FileEntry_create
+710010bd30,FileManager_mkdir
+710010b4d0,FileManager_registerFile
+71000a1a50,shared_ptr_release
+71006746a0,dbi_util_hexIdToString
+# --- saves helpers ---
+710019a100,dbi_saves_readSaveExtraData
+710013cd10,dbi_saves_getAccountString
+7100099e20,dbi_ns_getTitleName
+710016dfb0,dbi_time_format

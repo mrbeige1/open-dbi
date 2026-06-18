@@ -24,8 +24,26 @@
 #include "crypto/keyset.h"
 #include "crypto/nca.h"
 #include "install/ncm_backend.h"
+#include "install/dry_run.h"
+#include "install/report.h"
+#include "log/log.h"
+#include "build_version.h"
 
 using namespace dbi;
+
+// Outcome of the most recent install/dry-run, used by the debug-report key.
+static dbi::install::LastOp g_lastOp;
+
+// Forwards installer phase/error events into the structured log.
+class LogObserver : public dbi::install::InstallObserver {
+public:
+    void onPhase(dbi::install::Phase p, const char* detail) override {
+        dbi::log::line("[install] phase=%s %s", dbi::install::phaseName(p), detail ? detail : "");
+    }
+    void onError(dbi::install::Phase p, const char* op) override {
+        dbi::log::line("[install] FAILED in phase=%s at: %s", dbi::install::phaseName(p), op ? op : "");
+    }
+};
 
 // --- in-memory ContentSource ---
 class MemorySource : public io::ContentSource {
@@ -239,10 +257,13 @@ static void realInstall() {
     if (!nsp.valid()) { printf("[INSTALL] no sdmc:/install.nsp\n"); return; }
     dbi::install::NcmBackend be;
     dbi::install::Installer inst(be);
+    LogObserver obs; inst.setObserver(&obs);
     inst.setKeyset(&ks);
-    printf("[INSTALL] running (writes NCAs, registers, sets meta, commits)...\n"); consoleUpdate(NULL);
+    dbi::log::line("[INSTALL] real install sdmc:/install.nsp -> SD (writes ncm)");
     auto r = inst.installNsp(nsp, dbi::install::StorageId::SdCard);
-    printf("[INSTALL] ok=%d ncas=%d tickets=%d err=%s\n", r.ok, r.ncasWritten, r.ticketsImported, r.error.c_str());
+    dbi::log::line("[INSTALL] ok=%d ncas=%d tickets=%d err=%s",
+                   r.ok, r.ncasWritten, r.ticketsImported, r.error.c_str());
+    g_lastOp = {"real install (SD) sdmc:/install.nsp", true, r.ok, r.failedPhase, r.error};
     if (r.ok) printf("[INSTALL] DONE - check home menu / DBI; delete there if unwanted.\n");
 }
 
@@ -267,20 +288,45 @@ static void usbInstall() {
     dbi::usb::Dbi0FileSource src(c, nsp, 0);          // ContentSource over FILE_RANGE
     dbi::install::NcmBackend be;
     dbi::install::Installer inst(be);
+    LogObserver obs; inst.setObserver(&obs);
     inst.setKeyset(&ks);
+    dbi::log::line("[usb-install] installing over USB: %s", nsp.c_str());
     auto r = inst.installNsp(src, dbi::install::StorageId::SdCard);
-    printf("[usb-install] ok=%d ncas=%d tickets=%d err=%s\n", r.ok, r.ncasWritten, r.ticketsImported, r.error.c_str());
+    dbi::log::line("[usb-install] ok=%d ncas=%d tickets=%d err=%s",
+                   r.ok, r.ncasWritten, r.ticketsImported, r.error.c_str());
+    g_lastOp = {std::string("usb install ") + nsp, true, r.ok, r.failedPhase, r.error};
     if (r.ok) printf("[usb-install] DONE - check home menu / DBI.\n");
     c.sendExit();
     t.exit();
 }
 
+// DRY-RUN (read-only): parse sdmc:/install.nsp and log the planned install. No ncm.
+static void dryRunFromSd() {
+    dbi::crypto::Keyset ks;
+    bool haveKeys = (ks.load("sdmc:/switch/prod.keys") > 0 && ks.has_header_key);
+    dbi::io::FileSource nsp("sdmc:/install.nsp");
+    if (!nsp.valid()) { dbi::log::line("[dry-run] no sdmc:/install.nsp"); return; }
+    auto dr = dbi::install::dryRunInstall(nsp, haveKeys ? &ks : nullptr);
+    g_lastOp = {"dry-run sdmc:/install.nsp", true, dr.parsed, dbi::install::Phase::Parse, ""};
+}
+
+// Write a redacted debug report (build version + last op + structure + latest log).
+static void makeReport() {
+    dbi::crypto::Keyset ks;
+    bool haveKeys = (ks.load("sdmc:/switch/prod.keys") > 0 && ks.has_header_key);
+    dbi::io::FileSource nsp("sdmc:/install.nsp");
+    dbi::install::writeDebugReport(g_lastOp, nsp.valid() ? &nsp : nullptr, haveKeys ? &ks : nullptr);
+}
+
 int main(int, char**) {
     consoleInit(NULL);
-    printf("Open-DBI self-test (clean-room modules)  [BUILD r8: +NSZ]\n\n");
+    dbi::log::init();
+    printf("Open-DBI self-test (clean-room modules)  [%s]\n\n", OPEN_DBI_VERSION);
     selftest();
     printf("\nPress A = USB transfer test (read-only, needs dbibackend)\n"
            "Press B = NCA decrypt test (read-only)\n"
+           "Press Up = DRY-RUN install of sdmc:/install.nsp (read-only, safe)\n"
+           "Press Down = Create debug report (sdmc:/switch/open-dbi/logs/)\n"
            "Hold L+R+X = REAL install from sdmc:/install.nsp (writes ncm!)\n"
            "Hold L+R+Y = REAL install over USB from dbibackend (writes ncm!)\n"
            "Press + to exit.\n");
@@ -290,15 +336,14 @@ int main(int, char**) {
         padUpdate(&pad);
         u64 down = padGetButtonsDown(&pad);
         u64 held = padGetButtons(&pad);
+        bool lr = (held & HidNpadButton_L) && (held & HidNpadButton_R);
         if (down & HidNpadButton_Plus) break;
         if (down & HidNpadButton_A) { usbReceiveTest();  printf("\nPress + to exit.\n"); }
         if (down & HidNpadButton_B) { ncaDecryptTest();  printf("\nPress + to exit.\n"); }
-        if ((down & HidNpadButton_X) && (held & HidNpadButton_L) && (held & HidNpadButton_R)) {
-            realInstall(); printf("\nPress + to exit.\n");
-        }
-        if ((down & HidNpadButton_Y) && (held & HidNpadButton_L) && (held & HidNpadButton_R)) {
-            usbInstall(); printf("\nPress + to exit.\n");
-        }
+        if (down & HidNpadButton_Up)   { dryRunFromSd();  printf("\nPress + to exit.\n"); }
+        if (down & HidNpadButton_Down) { makeReport();    printf("\nPress + to exit.\n"); }
+        if ((down & HidNpadButton_X) && lr) { realInstall(); printf("\nPress + to exit.\n"); }
+        if ((down & HidNpadButton_Y) && lr) { usbInstall();  printf("\nPress + to exit.\n"); }
         consoleUpdate(NULL);
     }
     consoleExit(NULL);

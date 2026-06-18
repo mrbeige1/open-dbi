@@ -1,5 +1,6 @@
 // ncm_backend.cpp - real libnx ncm + custom es IPC InstallBackend. See ncm_backend.h.
 #include "ncm_backend.h"
+#include "../log/log.h"
 #include <switch.h>
 #include <cstdio>
 #include <cstring>
@@ -10,50 +11,66 @@ static NcmContentId    toContentId(const ContentId& a)    { NcmContentId c;    s
 static NcmPlaceHolderId toPlaceHolderId(const ContentId& a){ NcmPlaceHolderId p; std::memcpy(&p.uuid, a.data(), 16); return p; }
 
 bool NcmBackend::open(StorageId storage) {
-    if (R_FAILED(ncmInitialize())) return false;
+    Result rc = ncmInitialize();
+    dbi::log::result("ncm", "ncmInitialize", rc);
+    if (R_FAILED(rc)) return false;
     storageId_ = (int)storage;
     auto* cs = new NcmContentStorage{};
     auto* db = new NcmContentMetaDatabase{};
-    if (R_FAILED(ncmOpenContentStorage(cs, (NcmStorageId)storageId_)))      { delete cs; delete db; return false; }
-    if (R_FAILED(ncmOpenContentMetaDatabase(db, (NcmStorageId)storageId_))) { ncmContentStorageClose(cs); delete cs; delete db; return false; }
+    rc = ncmOpenContentStorage(cs, (NcmStorageId)storageId_);
+    dbi::log::result("ncm", "openContentStorage", rc);
+    if (R_FAILED(rc)) { delete cs; delete db; return false; }
+    rc = ncmOpenContentMetaDatabase(db, (NcmStorageId)storageId_);
+    dbi::log::result("ncm", "openContentMetaDatabase", rc);
+    if (R_FAILED(rc)) { ncmContentStorageClose(cs); delete cs; delete db; return false; }
     cs_ = cs; db_ = db; open_ = true;
     return true;
 }
 
 bool NcmBackend::generatePlaceHolderId(ContentId& out) {
     NcmPlaceHolderId ph;
-    if (R_FAILED(ncmContentStorageGeneratePlaceHolderId((NcmContentStorage*)cs_, &ph))) return false;
+    Result rc = ncmContentStorageGeneratePlaceHolderId((NcmContentStorage*)cs_, &ph);
+    if (R_FAILED(rc)) { dbi::log::result("ncm", "generatePlaceHolderId", rc); return false; }
     std::memcpy(out.data(), &ph.uuid, 16);
     return true;
 }
 
 bool NcmBackend::createPlaceHolder(const ContentId& cid, const ContentId& ph, uint64_t size) {
     NcmContentId c = toContentId(cid); NcmPlaceHolderId p = toPlaceHolderId(ph);
-    return R_SUCCEEDED(ncmContentStorageCreatePlaceHolder((NcmContentStorage*)cs_, &c, &p, (s64)size));
+    Result rc = ncmContentStorageCreatePlaceHolder((NcmContentStorage*)cs_, &c, &p, (s64)size);
+    dbi::log::result("ncm", "createPlaceHolder", rc);
+    return R_SUCCEEDED(rc);
 }
 
 bool NcmBackend::writePlaceHolder(const ContentId& ph, uint64_t offset, const void* data, size_t len) {
     NcmPlaceHolderId p = toPlaceHolderId(ph);
-    return R_SUCCEEDED(ncmContentStorageWritePlaceHolder((NcmContentStorage*)cs_, &p, offset, data, len));
+    // Called once per 1 MiB chunk - log failures only so the log isn't flooded.
+    Result rc = ncmContentStorageWritePlaceHolder((NcmContentStorage*)cs_, &p, offset, data, len);
+    if (R_FAILED(rc)) dbi::log::result("ncm", "writePlaceHolder", rc);
+    return R_SUCCEEDED(rc);
 }
 
 bool NcmBackend::registerContent(const ContentId& cid, const ContentId& ph) {
     NcmContentId c = toContentId(cid); NcmPlaceHolderId p = toPlaceHolderId(ph);
-    return R_SUCCEEDED(ncmContentStorageRegister((NcmContentStorage*)cs_, &c, &p));
+    Result rc = ncmContentStorageRegister((NcmContentStorage*)cs_, &c, &p);
+    dbi::log::result("ncm", "registerContent", rc);
+    return R_SUCCEEDED(rc);
 }
 
 // es ImportTicket (switchbrew: service "es", cmd 1; two In MapAlias buffers).
 bool NcmBackend::importTicket(const void* tik, size_t tikLen, const void* cert, size_t certLen) {
     Service es;
-    if (R_FAILED(smGetService(&es, "es"))) return false;
+    Result rc = smGetService(&es, "es");
+    if (R_FAILED(rc)) { dbi::log::result("es", "smGetService(es)", rc); return false; }
     const struct { } in = {};
     // If no cert provided, pass an empty buffer (DBI bundles .cert alongside .tik).
-    bool ok = R_SUCCEEDED(serviceDispatchIn(&es, 1, in,
+    rc = serviceDispatchIn(&es, 1, in,
         .buffer_attrs = { SfBufferAttr_In | SfBufferAttr_HipcMapAlias,
                           SfBufferAttr_In | SfBufferAttr_HipcMapAlias },
-        .buffers = { { tik, tikLen }, { cert, certLen } }));
+        .buffers = { { tik, tikLen }, { cert, certLen } });
+    dbi::log::result("es", "importTicket", rc);
     serviceClose(&es);
-    return ok;
+    return R_SUCCEEDED(rc);
 }
 
 bool NcmBackend::setContentMeta(uint64_t id, uint32_t version, uint8_t type,
@@ -62,7 +79,8 @@ bool NcmBackend::setContentMeta(uint64_t id, uint32_t version, uint8_t type,
     key.id = id; key.version = version; key.type = type;
     key.install_type = NcmContentInstallType_Full;
     Result rc = ncmContentMetaDatabaseSet((NcmContentMetaDatabase*)db_, &key, blob, blobLen);
-    if (R_FAILED(rc)) { printf("  [ncm] metaDatabaseSet rc=0x%08X\n", rc); return false; }
+    dbi::log::result("ncm", "contentMetaDatabaseSet", rc);
+    if (R_FAILED(rc)) return false;
     metaId_ = id; metaVer_ = version; metaType_ = type;   // for the ns record in commit()
     return true;
 }
@@ -80,10 +98,12 @@ bool NcmBackend::pushApplicationRecord() {
     rec.key.install_type = NcmContentInstallType_Full;
     rec.storage_id = (u64)storageId_;
 
-    if (R_FAILED(nsInitialize())) { printf("  [ns] nsInitialize failed\n"); return false; }
+    Result rc = nsInitialize();
+    dbi::log::result("ns", "nsInitialize", rc);
+    if (R_FAILED(rc)) return false;
     Service am;
-    Result rc = nsGetApplicationManagerInterface(&am);
-    if (R_FAILED(rc)) { printf("  [ns] getAppManager rc=0x%08X\n", rc); nsExit(); return false; }
+    rc = nsGetApplicationManagerInterface(&am);
+    if (R_FAILED(rc)) { dbi::log::result("ns", "getApplicationManagerInterface", rc); nsExit(); return false; }
 
     struct { u8 last_modified_event; u64 application_id; } in{};
     in.last_modified_event = 3;   // "installed"
@@ -93,14 +113,17 @@ bool NcmBackend::pushApplicationRecord() {
         .buffers = { { &rec, sizeof(rec) } });
     serviceClose(&am);
     nsExit();
-    if (R_FAILED(rc)) { printf("  [ns] PushApplicationRecord rc=0x%08X (appId=%016llx)\n", rc, (unsigned long long)appId); return false; }
-    printf("  [ns] PushApplicationRecord OK (appId=%016llx)\n", (unsigned long long)appId);
+    dbi::log::result("ns", "pushApplicationRecord", rc);
+    if (R_FAILED(rc)) return false;
+    dbi::log::line("[ns] pushApplicationRecord OK (appId=%016llx)", (unsigned long long)appId);
     return true;
 }
 
 bool NcmBackend::commit() {
     if (!db_) return false;
-    if (R_FAILED(ncmContentMetaDatabaseCommit((NcmContentMetaDatabase*)db_))) return false;
+    Result rc = ncmContentMetaDatabaseCommit((NcmContentMetaDatabase*)db_);
+    dbi::log::result("ncm", "contentMetaDatabaseCommit", rc);
+    if (R_FAILED(rc)) return false;
     // Register the application record so the title appears on the home menu.
     pushApplicationRecord();   // non-fatal: content is installed either way
     return true;

@@ -110,4 +110,5 @@ Also: `FindInstallCallers.py <prims.csv>` (find callers of a primitive set),
 
 ## 8. Doc index
 `PROJECT.md` · `ARCHITECTURE.md` · `PROGRESS.md` · `PROTOCOL.md` · `CONFIG.md` · `FEATURES.md` ·
-`FORMATS.md` · `SYMBOLS.md` · `RE-METHODOLOGY.md` · `BUILD.md` · `open-dbi/README.md`
+`FORMATS.md` · `SYMBOLS.md` · `RE-METHODOLOGY.md` · `BUILD.md` · `MILESTONES.md` ·
+`TEST-MATRIX.md` · `open-dbi/README.md`

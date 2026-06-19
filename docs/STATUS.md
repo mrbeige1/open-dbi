@@ -56,11 +56,12 @@ AES-128 (ECB/CTR/XTS), SHA-256 (`source/crypto/sha256.*`, host-validated vs FIPS
 **Needs no keys (should work once tested):** parse NSP, write/register NCAs, import tickets, commit.
 
 **Gated / unverified:**
-1. **NCA decrypt vs a real NCA** — `source/crypto/nca.cpp` implements header XTS, key-area ECB
-   unwrap, and section CTR to spec, but the XTS sector tweak, the section-CTR IV, and the
-   PFS0-offset-within-section are **marked `UNVERIFIED`**. They need `prod.keys` + a real Meta NCA.
-   `CheckHash` now exercises this end-to-end: the dry-run's per-NCA SHA-256 vs CNMT-hash line is the
-   instrument to confirm it (a PASS means decrypt + CNMT extraction produced the right bytes).
+1. **NCA decrypt vs a real NCA — VALIDATED on hardware (keygen 0, kaekIndex 0, standard crypto).**
+   `source/crypto/nca.cpp` (header XTS, key-area ECB unwrap, section CTR, PFS0 offset) decrypted a
+   real base-game Meta NCA on-device and extracted a coherent CNMT (titleId `01d05aeff2ee0000`,
+   type 0x80, 2 content records); SHA-256 (oneshot+stream) and CNMT hash-capture also PASS on-device.
+   The former `UNVERIFIED` markers are now confirmed for this path. **Remaining (M1 hardening):**
+   widen across other keygens / kaek indices and titlekey (rights-id) content.
 2. **ncm meta blob** — `NcmBackend::setContentMeta` receives the decrypted CNMT but still must build
    the `NcmContentMetaHeader` + `NcmContentInfo` record array and call `ncmContentMetaDatabaseSet`.
 3. **`usb:ds` transport** — the DBI0 client runs over an abstract `BulkTransport`; the libnx

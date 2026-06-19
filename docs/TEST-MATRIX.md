@@ -34,6 +34,7 @@ build:        <from the log header, e.g. c0343c0-dirty>
 case:         <which row below>
 file:         <type/size, e.g. base NSP 1.6 GB>
 dry-run:      <PASS/FAIL — did it parse + report the right titleId / meta type?>
+checkhash:    <from the dry-run "CheckHash: N pass, M fail" line, e.g. 3 pass 0 fail>
 install:      <PASS/FAIL/n/a>
 failed phase: <parse | write-nca | import-ticket | content-meta | commit | n/a>
 result codes: <any rc=0x........ lines from the log>
@@ -56,6 +57,7 @@ notes:        <home-menu launch? anything unexpected?>
 | 10 | Missing `prod.keys` | parses; logs "needs prod.keys"; no crash | n/a (blocked early) | M1 |
 | 11 | Missing ticket/cert (rights-id content) | dry-run WARNS "rights-id but no ticket" | fails at import-ticket | M1 |
 | 12 | XCI / XCZ | (not yet supported) | (not yet supported) | **M6** |
+| 13 | CheckHash (any NSP) | `CheckHash: N pass, 0 fail` for every `.nca` (with keys: `cnmt+name`; without: `name`) | with `[Install] CheckHash` on, a corrupt NCA aborts at **content-meta** | M1 |
 
 Rows in **bold-gated** milestones depend on features that are not yet complete
 (`M2` USB, `M3` NSZ correctness, `M4` rollback, `M6` XCI) — a FAIL there is expected

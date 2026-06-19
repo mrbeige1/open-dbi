@@ -30,6 +30,13 @@ is implemented to spec but parts are still marked `UNVERIFIED` in `source/crypto
   standard-crypto and titlekey (rights-id) content.
 - **Exit criterion:** dry-run reports the correct `titleId`/CNMT for NSPs spanning several
   keygens and rights-id / no-rights-id, with `CheckHash` passing on real installs.
+- **In progress:** `CheckHash` is implemented — a clean-room SHA-256 (`source/crypto/sha256.*`,
+  host-validated vs FIPS 180-4 vectors) verifies each content NCA against the CNMT's recorded
+  hash (and the filename naming invariant). Dry-run runs the check read-only and reports
+  per-NCA PASS/FAIL; the installer aborts in the content-meta phase on a mismatch when
+  `[Install] CheckHash` is set (default on). `.ncz` content is hashed from its reconstructed
+  bytes (full NSZ verification lands with M3). The `UNVERIFIED` crypto markers are now exercised
+  end-to-end by this check — confirming them is the remaining on-hardware step.
 
 ## M2 — USB install robustness
 SD install works without USB; the `usb:ds` `BulkTransport` is the newer path.

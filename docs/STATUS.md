@@ -49,8 +49,9 @@ clean-room boundary). Never commit `DBI.nro`, decompiled C, or `prod.keys`. See 
 **Builds & compiles, all clean-room:** DBI0 USB protocol + Switch-side client, `dbi.config` parser,
 save-backup format, `ContentSource` seam, PFS0/NSP reader, the 5-phase `Installer`, a **real libnx
 ncm + es backend** (placeholder/write/register/commit + ImportTicket), `FileSource` (install from SD),
-AES-128 (ECB/CTR/XTS), `prod.keys` parser, NCA header/section decrypt, CNMT parser, and the
-cnmt.nca → CNMT → `setContentMeta` wiring.
+AES-128 (ECB/CTR/XTS), SHA-256 (`source/crypto/sha256.*`, host-validated vs FIPS 180-4),
+`prod.keys` parser, NCA header/section decrypt, CNMT parser, the cnmt.nca → CNMT →
+`setContentMeta` wiring, and `CheckHash` (SHA-256 content verification in dry-run + installer).
 
 **Needs no keys (should work once tested):** parse NSP, write/register NCAs, import tickets, commit.
 
@@ -58,6 +59,8 @@ cnmt.nca → CNMT → `setContentMeta` wiring.
 1. **NCA decrypt vs a real NCA** — `source/crypto/nca.cpp` implements header XTS, key-area ECB
    unwrap, and section CTR to spec, but the XTS sector tweak, the section-CTR IV, and the
    PFS0-offset-within-section are **marked `UNVERIFIED`**. They need `prod.keys` + a real Meta NCA.
+   `CheckHash` now exercises this end-to-end: the dry-run's per-NCA SHA-256 vs CNMT-hash line is the
+   instrument to confirm it (a PASS means decrypt + CNMT extraction produced the right bytes).
 2. **ncm meta blob** — `NcmBackend::setContentMeta` receives the decrypted CNMT but still must build
    the `NcmContentMetaHeader` + `NcmContentInfo` record array and call `ncmContentMetaDatabaseSet`.
 3. **`usb:ds` transport** — the DBI0 client runs over an abstract `BulkTransport`; the libnx

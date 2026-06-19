@@ -22,6 +22,11 @@ struct DryRunResult {
     uint64_t titleId = 0;
     bool     anyRightsId = false;  // any NCA carries a rights-id (titlekey crypto)
     bool     keysAvailable = false;// prod.keys present (NCA-header fields decoded)
+    // CheckHash (SHA-256) verification pass:
+    bool     hashChecked = false;  // the verification pass ran
+    int      hashPass = 0;         // NCAs whose SHA-256 matched its reference
+    int      hashFail = 0;         // NCAs whose SHA-256 did NOT match (corruption)
+    int      hashSkipped = 0;      // .ncz entries (reconstruction hashing is M3)
 };
 
 // Parse `src`, log every entry's structure + a planned-install summary via dbi::log,

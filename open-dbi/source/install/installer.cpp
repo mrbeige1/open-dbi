@@ -2,11 +2,14 @@
 #include "installer.h"
 #include "../crypto/nca.h"
 #include "../crypto/ncz.h"
+#include "../crypto/sha256.h"
+#include "../fs/cnmt.h"
 #include "meta_builder.h"
 #include <cctype>
 #include <vector>
 #include <cstring>
 #include <algorithm>
+#include <utility>
 
 namespace dbi::install {
 
@@ -46,7 +49,7 @@ bool parseContentId(const std::string& name, ContentId& out) {
 }
 
 bool Installer::streamIntoPlaceHolder(io::ContentSource& src, const fs::Pfs0Entry& e,
-                                      const ContentId& placeHolder) {
+                                      const ContentId& placeHolder, crypto::Sha256* hash) {
     constexpr size_t CHUNK = 0x100000; // 1 MiB, matching the DBI0 segment size
     std::vector<uint8_t> buf(CHUNK);
     uint64_t written = 0;
@@ -55,6 +58,7 @@ bool Installer::streamIntoPlaceHolder(io::ContentSource& src, const fs::Pfs0Entr
         size_t got = src.read(buf.data(), e.offset + written, want);
         if (got == 0) return false;
         if (!backend_.writePlaceHolder(placeHolder, written, buf.data(), got)) return false;
+        if (hash) hash->update(buf.data(), got);   // CheckHash: hash the bytes as written
         written += got;
     }
     return true;
@@ -69,8 +73,10 @@ InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
         phase = p;
         if (obs_) obs_->onPhase(p, detail);
     };
-    // Declared before any `goto fail` so the jumps don't bypass its initialization.
+    // Declared before any `goto fail` so the jumps don't bypass their initialization.
     std::vector<uint8_t> scratch;
+    // CheckHash: SHA-256 of each written NCA, keyed by content id, verified in Phase 3.
+    std::vector<std::pair<ContentId, std::array<uint8_t, 32>>> computed;
     {
     fs::Pfs0 pfs;
     // --- Phase 0: parse container ---
@@ -90,14 +96,26 @@ InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
         ContentId ph;
         if (!backend_.generatePlaceHolderId(ph))                  { r.error = "genPlaceHolderId"; goto fail; }
         if (!backend_.createPlaceHolder(cid, ph, ncaSize))        { r.error = "createPlaceHolder"; goto fail; }
+        crypto::Sha256 hasher;
+        crypto::Sha256* hp = verifyHashes_ ? &hasher : nullptr;
         if (isNcz) {
+            // The sink sees the *reconstructed* NCA bytes, so hashing here verifies
+            // the rebuilt content (not the compressed .ncz) against the CNMT.
             struct PhSink : crypto::NcaWriteSink {
-                InstallBackend* be; const ContentId* ph;
-                bool write(uint64_t off, const void* d, size_t n) override { return be->writePlaceHolder(*ph, off, d, n); }
-            } sink; sink.be = &backend_; sink.ph = &ph;
+                InstallBackend* be; const ContentId* ph; crypto::Sha256* hash;
+                bool write(uint64_t off, const void* d, size_t n) override {
+                    if (!be->writePlaceHolder(*ph, off, d, n)) return false;
+                    if (hash) hash->update(d, n);
+                    return true;
+                }
+            } sink; sink.be = &backend_; sink.ph = &ph; sink.hash = hp;
             if (!crypto::nczReconstruct(nsp, e.offset, e.size, sink)) { r.error = "ncz reconstruct: " + e.name; goto fail; }
         } else {
-            if (!streamIntoPlaceHolder(nsp, e, ph))               { r.error = "writePlaceHolder"; goto fail; }
+            if (!streamIntoPlaceHolder(nsp, e, ph, hp))           { r.error = "writePlaceHolder"; goto fail; }
+        }
+        if (hp) {
+            std::array<uint8_t, 32> dg; hasher.finish(dg.data());
+            computed.emplace_back(cid, dg);
         }
         if (!backend_.registerContent(cid, ph))                   { r.error = "register"; goto fail; }
         ++r.ncasWritten;
@@ -124,6 +142,19 @@ InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
             if (!keyset_) { r.error = "cnmt.nca present but no keyset (needs prod.keys)"; goto fail; }
             std::vector<uint8_t> cnmt = crypto::ncaExtractCnmt(scratch.data(), scratch.size(), *keyset_);
             if (cnmt.empty()) { r.error = "CNMT decrypt/extract failed"; goto fail; }
+            // CheckHash: every content NCA's SHA-256 (computed while writing in Phase 1)
+            // must match the hash the CNMT records for it. Verified before setContentMeta.
+            if (verifyHashes_) {
+                fs::Cnmt cn;
+                if (!cn.parse(cnmt.data(), cnmt.size())) { r.error = "CheckHash: CNMT parse failed"; goto fail; }
+                for (const auto& mc : cn.contents) {
+                    const std::array<uint8_t, 32>* dg = nullptr;
+                    for (auto& p : computed)
+                        if (std::memcmp(p.first.data(), mc.id, 16) == 0) { dg = &p.second; break; }
+                    if (!dg)                                          { r.error = "CheckHash: CNMT content missing from NSP"; goto fail; }
+                    if (std::memcmp(dg->data(), mc.hash, 32) != 0)    { r.error = "CheckHash: SHA-256 mismatch"; goto fail; }
+                }
+            }
             ContentId metaId{};
             parseContentId(e.name, metaId);
             MetaToSet ms;

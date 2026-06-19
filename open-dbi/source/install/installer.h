@@ -11,6 +11,7 @@
 #include "../io/content_source.h"
 #include "../fs/pfs0.h"
 #include "../crypto/keyset.h"
+#include "../crypto/sha256.h"
 
 namespace dbi::install {
 
@@ -72,6 +73,11 @@ public:
     // Optional progress/error observer (see InstallObserver). Default: none.
     void setObserver(InstallObserver* obs) { obs_ = obs; }
 
+    // CheckHash: when enabled, the SHA-256 of every written NCA is verified against
+    // the CNMT's recorded hash; a mismatch aborts the install in the content-meta
+    // phase. Off by default (matches dbi.config's [Install] CheckHash).
+    void setVerifyHashes(bool v) { verifyHashes_ = v; }
+
     // Install an NSP read through `nsp` into `storage`. Implements the recovered
     // phase order: parse container -> per-NCA placeholder/write/register ->
     // ticket import -> setContentMeta -> commit.
@@ -81,8 +87,10 @@ private:
     InstallBackend& backend_;
     const crypto::Keyset* keyset_ = nullptr;
     InstallObserver* obs_ = nullptr;
+    bool verifyHashes_ = false;
+    // `hash`, when non-null, accumulates the SHA-256 of the bytes written.
     bool streamIntoPlaceHolder(io::ContentSource& src, const fs::Pfs0Entry& e,
-                               const ContentId& placeHolder);
+                               const ContentId& placeHolder, crypto::Sha256* hash);
 };
 
 // Parse a 16-hex-char NCA filename prefix (e.g. "<32hex>.nca") into a ContentId.

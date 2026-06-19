@@ -7,10 +7,15 @@ devkitPro + libnx.
 Install devkitPro and the Switch group (see `RE-METHODOLOGY.md §0`):
 ```sh
 # macOS: installer pkg from github.com/devkitPro/pacman, then:
-sudo dkp-pacman -Sy
-sudo dkp-pacman -S --noconfirm switch-dev
+#   (Apple Silicon also needs Rosetta: softwareupdate --install-rosetta)
+sudo dkp-pacman -Syu --noconfirm switch-dev switch-libzstd
 ```
-This provides devkitA64 (GCC), libnx, and the NRO tools (`elf2nro`, `nacptool`).
+- `switch-dev` provides devkitA64 (GCC), libnx, and the NRO tools (`elf2nro`, `nacptool`).
+- `switch-libzstd` is **required**: the `Makefile` links `-lzstd` for `source/crypto/ncz.cpp`
+  (NSZ/NCZ decompression). Without it the link fails with `cannot find -lzstd`.
+  Note the package is `switch-libzstd`, *not* `switch-zstd`.
+- `-Syu` refreshes the package db first; the installer pkg ships a stale snapshot, so a plain
+  `-S` can report `target not found` for newer packages.
 
 ## Build
 ```sh

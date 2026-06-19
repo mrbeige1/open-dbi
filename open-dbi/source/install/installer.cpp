@@ -23,6 +23,17 @@ int hexNib(char c) {
 }
 } // namespace
 
+const char* phaseName(Phase p) {
+    switch (p) {
+        case Phase::Parse:        return "parse";
+        case Phase::WriteNca:     return "write-nca";
+        case Phase::ImportTicket: return "import-ticket";
+        case Phase::ContentMeta:  return "content-meta";
+        case Phase::Commit:       return "commit";
+    }
+    return "?";
+}
+
 bool parseContentId(const std::string& name, ContentId& out) {
     // NCA files are named <32 lowercase hex>.nca / .cnmt.nca
     if (name.size() < 32) return false;
@@ -51,16 +62,27 @@ bool Installer::streamIntoPlaceHolder(io::ContentSource& src, const fs::Pfs0Entr
 
 InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
     InstallResult r;
-    // --- Phase 0: parse container ---
-    fs::Pfs0 pfs;
-    if (!pfs.open(nsp)) { r.error = "not a PFS0/NSP"; return r; }
-    if (!backend_.open(storage)) { r.error = "ncm open failed"; return r; }
-
+    // `phase` tracks where we are; on a `goto fail` it still holds the phase we were
+    // in, so r.failedPhase is set correctly at the fail label (no per-site edits).
+    Phase phase = Phase::Parse;
+    auto note = [&](Phase p, const char* detail) {
+        phase = p;
+        if (obs_) obs_->onPhase(p, detail);
+    };
+    // Declared before any `goto fail` so the jumps don't bypass its initialization.
     std::vector<uint8_t> scratch;
+    {
+    fs::Pfs0 pfs;
+    // --- Phase 0: parse container ---
+    note(Phase::Parse, "open container");
+    if (!pfs.open(nsp)) { r.error = "not a PFS0/NSP"; goto fail; }
+    if (!backend_.open(storage)) { r.error = "ncm open storage failed"; goto fail; }
+
     // --- Phase 1: per-NCA placeholder -> write -> register (.nca copied as-is, .ncz reconstructed) ---
     for (const auto& e : pfs.entries()) {
         bool isNcz = endsWith(e.name, ".ncz");
         if (!endsWith(e.name, ".nca") && !isNcz) continue;
+        note(Phase::WriteNca, e.name.c_str());
         ContentId cid;
         if (!parseContentId(e.name, cid)) { r.error = "bad nca name: " + e.name; goto fail; }
         uint64_t ncaSize = isNcz ? crypto::nczReconstructedSize(nsp, e.offset) : e.size;
@@ -83,6 +105,7 @@ InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
     // --- Phase 2: es ticket import (.tik [+ .cert]) ---
     for (const auto& e : pfs.entries()) {
         if (!endsWith(e.name, ".tik")) continue;
+        note(Phase::ImportTicket, e.name.c_str());
         scratch.resize((size_t)e.size);
         if (nsp.read(scratch.data(), e.offset, scratch.size()) != scratch.size()) { r.error = "read tik"; goto fail; }
         // cert lookup (same basename + .cert) is left to the backend / a later pass.
@@ -92,6 +115,7 @@ InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
     // --- Phase 3: content-meta from the CNMT NCA, then commit ---
     for (const auto& e : pfs.entries()) {
         if (!endsWith(e.name, ".cnmt.nca") && !endsWith(e.name, ".cnmt")) continue;
+        note(Phase::ContentMeta, e.name.c_str());
         scratch.resize((size_t)e.size);
         if (nsp.read(scratch.data(), e.offset, scratch.size()) != scratch.size()) { r.error = "read cnmt"; goto fail; }
         if (endsWith(e.name, ".cnmt.nca")) {
@@ -108,12 +132,16 @@ InstallResult Installer::installNsp(io::ContentSource& nsp, StorageId storage) {
         }
         break;
     }
+    note(Phase::Commit, "commit");
     if (!backend_.commit()) { r.error = "commit"; goto fail; }
 
     backend_.closeStorage();
     r.ok = true;
     return r;
+    } // end of pfs/loops scope
 fail:
+    r.failedPhase = phase;
+    if (obs_) obs_->onError(phase, r.error.c_str());
     backend_.closeStorage();
     return r;
 }

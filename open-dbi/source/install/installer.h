@@ -38,7 +38,28 @@ public:
     virtual void closeStorage() = 0;
 };
 
-struct InstallResult { bool ok = false; int ncasWritten = 0; int ticketsImported = 0; std::string error; };
+// The install proceeds through these phases in order; failedPhase records the one
+// that aborted so logs/reports can name the exact step ("open storage, create
+// placeholder, write, register, import ticket, set meta, commit").
+enum class Phase { Parse, WriteNca, ImportTicket, ContentMeta, Commit };
+const char* phaseName(Phase p);
+
+// Optional observer the installer notifies at each phase boundary and on failure.
+// Default no-op; main.cpp wires one that forwards to dbi::log. Keeping it an
+// abstract hook keeps the install core free of any console/log dependency.
+struct InstallObserver {
+    virtual ~InstallObserver() = default;
+    virtual void onPhase(Phase p, const char* detail) {}   // entering / progressing a phase
+    virtual void onError(Phase p, const char* op) {}        // failure in phase p at op
+};
+
+struct InstallResult {
+    bool ok = false;
+    int ncasWritten = 0;
+    int ticketsImported = 0;
+    Phase failedPhase = Phase::Parse;   // meaningful only when ok == false
+    std::string error;
+};
 
 class Installer {
 public:
@@ -48,6 +69,9 @@ public:
     // (required for setContentMeta). Without it, the meta step is skipped.
     void setKeyset(const crypto::Keyset* ks) { keyset_ = ks; }
 
+    // Optional progress/error observer (see InstallObserver). Default: none.
+    void setObserver(InstallObserver* obs) { obs_ = obs; }
+
     // Install an NSP read through `nsp` into `storage`. Implements the recovered
     // phase order: parse container -> per-NCA placeholder/write/register ->
     // ticket import -> setContentMeta -> commit.
@@ -56,6 +80,7 @@ public:
 private:
     InstallBackend& backend_;
     const crypto::Keyset* keyset_ = nullptr;
+    InstallObserver* obs_ = nullptr;
     bool streamIntoPlaceHolder(io::ContentSource& src, const fs::Pfs0Entry& e,
                                const ContentId& placeHolder);
 };

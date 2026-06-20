@@ -14,7 +14,7 @@ closed-source freeware. Resolve licensing before publishing (author permission, 
 clean-room boundary). Never commit `DBI.nro`, decompiled C, or `prod.keys`. See `../PROJECT.md`.
 
 ## 2. Current state (snapshot)
-- **Ghidra DB** `~/DBI.gpr`: 9,403 functions, **~1,111 named** (221 `dbi_*` app + 890 library).
+- **Ghidra DB** `~/DBI.gpr`: 9,403 functions, **~1,197 named** (296 `dbi_*` app + 901 library).
 - **Subsystems mapped:** saves, dumps, **install (full pipeline)**, forwarder, mtp, ftp, network/AP,
   pdm/activity-log, config, fs, ui, log, app, ncm wrapper tier, ticket parse/format.
 - **`open-dbi/` builds** to `open-dbi.nro` (~286 KB) with a console self-test.
@@ -117,9 +117,8 @@ Also: `FindInstallCallers.py <prims.csv>` (find callers of a primitive set),
   @`710018c240`. *Still open:* the actual `esImportTicket` / `splCryptoDecryptAesKey` titlekey-decrypt
   calls live deeper under `dbi_ticket_parse` @`710018c2d0` — decompile it + the two ticket-glue callees next.
 - **RESUME POINT (app-candidate queue):** `app_candidates.csv` has 1,114 ranked unknowns; the top ~14 are
-  recovered. **4 already-decompiled, not-yet-named** (agent session limit): `71001b2bd0`, `710015f9e0`,
-  `710011f780`, `710011c110` (`.c` in `exports/decompiled/`) — just run agents on these, merge, ApplyNames.
-  Then `PickTopUnknown.py 18 14` for the next wave.
+  recovered (batches 7-9). Continue with `PickTopUnknown.py 16 42` for the next wave, then merge +
+  ApplyNames. Helper `merge_batch.py <out.csv> <addrs...>` does the host-side frag merge.
 - **UI render layer** (nvnflinger framebuffer + TTF; the menu/event loop) — large, obfuscated.
 - ~8,400 functions still `FUN_*` (mix of version-drifted library + obfuscated app code).
 

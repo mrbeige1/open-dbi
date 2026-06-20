@@ -9,9 +9,9 @@ Quantitative state of the reconstruction. Update as phases advance.
 | Library — FID strict match | 1,182 | 12.6% | devkitA64 FidDb (libnx/libc/libstdc++/libsupc++/libm), 751 uniquely named |
 | Library — string-only hint | 824 | 8.8% | `ExportContext.py` keyword heuristic (libstdc++ etc.) |
 | **Library subtotal** | **2,006** | **21.3%** | |
-| App — recovered & named (`dbi_*`) | 221 | 2.4% | Phase 3 decompile→agent pipeline |
-| Library named (`lib_*` + libnx/std) | 890 | 9.5% | FID + agent-confirmed |
-| **Still `FUN_*` (unknown)** | **8,230** | **87.5%** | version-drifted library + obfuscated-string app code |
+| App — recovered & named (`dbi_*`) | 296 | 3.1% | Phase 3 decompile→agent pipeline |
+| Library named (`lib_*` + libnx/std) | 901 | 9.6% | FID + agent-confirmed |
+| **Still `FUN_*` (unknown)** | **8,143** | **86.6%** | version-drifted library + obfuscated-string app code |
 
 > 965 named. **Install pipeline mapped** end-to-end: `dbi_install_run` (5-phase) + `parseContainer`
 > (NSP=PFS0 / XCI=HFS0 → MetaKey RB-tree + content vector) + `resolveContent` (validate
@@ -43,6 +43,17 @@ recovery queue. Batch 2 recovered the top 4; ~712 remain (plus 2 to redo after a
   (confirms the **QR-code access point** the README omitted), `dbi_forwarder_buildNsp` (new **forwarder**
   subsystem — builds shortcut NSPs with JPEG icons), `dbi_pdm_buildPlayEventReport` (new **pdm** subsystem
   — the Activity Log / play-history via `pdmqry*`). +21 callee names applied.
+- **Batch 8/9 (32 app candidates, ~89 names):** continued draining the ranked app-candidate queue.
+  Confirmed **new subsystems**: **ftp** (`dbi_ftp_cmdList` — LIST/NLST/STAT with RFC-959 reply codes),
+  **network/http** (`dbi_net_httpClient_ctor` — wraps a **libcurl** easy handle; `[General] ValidateSSL`,
+  HTTP auth), and the **UI settings menu** (`dbi_ui_buildConfigBoolRow`, `dbi_ui_buildConfigThemeRow`,
+  `dbi_ui_titleListView_construct`, file-browser `drawStatusBar`/`drawColumn`/`onSelect`). Plus more
+  install glue (`dbi_install_registerContentFile`, `_resolveMetaContents`, `_buildContentFileViews`,
+  `_confirmFreeSpaceAndPrompt`, `_registerContentPathById`, `_titleHasContentFiles`), saves
+  (`dbi_saves_finalizeSaveEntry`, `_promptResizeSaveData`, `_addSaveBrowseEntry`), dumps
+  (`dbi_dump_recryptContentHashed` — NCA header XTS re-encrypt + dual SHA-256; `dbi_dump_buildTicketNsp`),
+  pfs0 (`dbi_pfs0_buildPartitionHeader`, `dbi_install_buildNcaSections`), and a family of report builders
+  (`dbi_report_buildIdListReport`/`buildSummaryReport`/`dumpContentRecord`/`appendOkLine`).
 - **Batch 7 (14 of top app candidates, 62 names):** large high-score app functions, mostly the
   **install / diagnostics-report cluster**. `dbi_report_buildCleanupReport` @`71000ce3b0` (the top-level
   "Cleanup" debug-report builder; orchestrates ~12 flag-gated sections), with section handlers

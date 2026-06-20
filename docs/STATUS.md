@@ -14,7 +14,7 @@ closed-source freeware. Resolve licensing before publishing (author permission, 
 clean-room boundary). Never commit `DBI.nro`, decompiled C, or `prod.keys`. See `../PROJECT.md`.
 
 ## 2. Current state (snapshot)
-- **Ghidra DB** `~/DBI.gpr`: 9,403 functions, **~965 named** (~150 `dbi_*` app + ~815 library).
+- **Ghidra DB** `~/DBI.gpr`: 9,403 functions, **~1,111 named** (221 `dbi_*` app + 890 library).
 - **Subsystems mapped:** saves, dumps, **install (full pipeline)**, forwarder, mtp, ftp, network/AP,
   pdm/activity-log, config, fs, ui, log, app, ncm wrapper tier, ticket parse/format.
 - **`open-dbi/` builds** to `open-dbi.nro` (~286 KB) with a console self-test.
@@ -66,7 +66,11 @@ AES-128 (ECB/CTR/XTS), SHA-256 (`source/crypto/sha256.*`, host-validated vs FIPS
    the `NcmContentMetaHeader` + `NcmContentInfo` record array and call `ncmContentMetaDatabaseSet`.
 3. **`usb:ds` transport** — the DBI0 client runs over an abstract `BulkTransport`; the libnx
    `usb:ds` implementation isn't written (SD-card install via `FileSource` works without it).
-4. **NSZ/XCZ decompression** — still **not located** in `DBI.nro` (see §6).
+4. **NSZ/XCZ decompression** — **LOCATED & named** (batch 4): it is DBI's bundled
+   **libarchive 7-Zip reader**. NSZ/XCZ zstd content decodes through the 7z multi-codec
+   block path (`lib_7z_decode_block` @`710079c470`, zstd = 7z method `0x4f71101` →
+   `lib_zstd_decompressStream` @`710070cdd0`); DBI's own driver is
+   `dbi_nca_decompressBlock` @`7100700bc0`. Reimplementation in `open-dbi/` not yet written.
 
 ## 5. How to build & test `open-dbi` on a real Switch
 ```sh
@@ -96,9 +100,26 @@ Also: `FindInstallCallers.py <prims.csv>` (find callers of a primitive set),
 `FindStringXrefs.py` (string→function), `HashLibrary.py`/`MatchToDBI.py` (FID library subtraction).
 
 **Highest-value unfinished RE targets:**
-- **NSZ/XCZ decompressor** — find callers of the zstd/lzma entry points (FID didn't name them due to
-  version drift; try xrefs from the `NczSection`/decompression error strings, or BSim).
-- **es ticket import** path (`dbi_ticket_parse` @`710018c2d0` + `splCrypto*`) — confirms titlekey decrypt.
+- ~~**NSZ/XCZ decompressor**~~ — **DONE (batch 4).** It is DBI's bundled **libarchive 7-Zip reader**
+  (range `~0x710079xxxx–0x71007axxxx`). 52 functions named: format registration
+  (`lib_archive_read_support_format_7zip` @`71007a06d0`), header parse (`lib_archive_7z_read_header`
+  @`710079ef70`), the multi-codec block decompressor (`lib_7z_decode_block` @`710079c470`) and its
+  per-codec wrappers — zstd (`lib_zstd_decompressStream` @`710070cdd0`, method `0x4f71101`), LZMA/LZMA2
+  (`lib_lzma_decodeStep` @`71007a7f90`), bzip2 (`lib_bzip2_decompress` @`71007ad910`), zlib/Deflate
+  (`lib_inflate` @`7100705410`), PPMd, and BCJ/BCJ2 branch filters — plus DBI's own glue
+  `dbi_nca_decompressBlock` @`7100700bc0`. **Open follow-up:** the codec table is reached by indirect
+  (function-pointer) calls, so the *app-side* call into it (from `dbi_install`/`parseContainer`) wasn't
+  found by static call-graph; locate it via **data xrefs** to the format-registration entry. The HTTP
+  gzip path is separate: `dbi_net_decodeContentEncoding` @`71006cf200`.
+- **es ticket import** path — *partly done (batch 5):* `dbi_ticket_getRightsId` @`710018c390`,
+  `dbi_ticket_wipeSignature` @`710018bd80`, `dbi_install_enqueueContentMetaEntry` @`7100181160` (stages
+  `.tik`/`.cert`), and ticket glue `dbi_ticket_validateOrImport` @`710018c2b0` / `dbi_ticket_loadCert`
+  @`710018c240`. *Still open:* the actual `esImportTicket` / `splCryptoDecryptAesKey` titlekey-decrypt
+  calls live deeper under `dbi_ticket_parse` @`710018c2d0` — decompile it + the two ticket-glue callees next.
+- **RESUME POINT (app-candidate queue):** `app_candidates.csv` has 1,114 ranked unknowns; the top ~14 are
+  recovered. **4 already-decompiled, not-yet-named** (agent session limit): `71001b2bd0`, `710015f9e0`,
+  `710011f780`, `710011c110` (`.c` in `exports/decompiled/`) — just run agents on these, merge, ApplyNames.
+  Then `PickTopUnknown.py 18 14` for the next wave.
 - **UI render layer** (nvnflinger framebuffer + TTF; the menu/event loop) — large, obfuscated.
 - ~8,400 functions still `FUN_*` (mix of version-drifted library + obfuscated app code).
 

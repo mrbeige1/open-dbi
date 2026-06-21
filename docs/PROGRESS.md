@@ -9,9 +9,9 @@ Quantitative state of the reconstruction. Update as phases advance.
 | Library — FID strict match | 1,182 | 12.6% | devkitA64 FidDb (libnx/libc/libstdc++/libsupc++/libm), 751 uniquely named |
 | Library — string-only hint | 824 | 8.8% | `ExportContext.py` keyword heuristic (libstdc++ etc.) |
 | **Library subtotal** | **2,006** | **21.3%** | |
-| App — recovered & named (`dbi_*`) | 296 | 3.1% | Phase 3 decompile→agent pipeline |
-| Library named (`lib_*` + libnx/std) | 901 | 9.6% | FID + agent-confirmed |
-| **Still `FUN_*` (unknown)** | **8,143** | **86.6%** | version-drifted library + obfuscated-string app code |
+| App — recovered & named (`dbi_*`) | 326 | 3.5% | Phase 3 decompile→agent pipeline |
+| Library named (`lib_*` + libnx/std) | 916 | 9.7% | FID + agent-confirmed |
+| **Still `FUN_*` (unknown)** | **8,098** | **86.1%** | version-drifted library + obfuscated-string app code |
 
 > 965 named. **Install pipeline mapped** end-to-end: `dbi_install_run` (5-phase) + `parseContainer`
 > (NSP=PFS0 / XCI=HFS0 → MetaKey RB-tree + content vector) + `resolveContent` (validate
@@ -43,6 +43,13 @@ recovery queue. Batch 2 recovered the top 4; ~712 remain (plus 2 to redo after a
   (confirms the **QR-code access point** the README omitted), `dbi_forwarder_buildNsp` (new **forwarder**
   subsystem — builds shortcut NSPs with JPEG icons), `dbi_pdm_buildPlayEventReport` (new **pdm** subsystem
   — the Activity Log / play-history via `pdmqry*`). +21 callee names applied.
+- **Batch 10 (15 app candidates, 45 names):** more queue drain. **ftp** internals
+  (`dbi_ftp_dataConnClose`, `dbi_ftp_formatAddrLine`), **mtp** (`dbi_mtp_assertMatchingTransactionId`),
+  **network** (`dbi_net_setNonBlocking`), **config** nested get/set/remove
+  (`dbi_config_getNestedString`/`setNested3`/`removeEntryItem`, `dbi_config_importFromDir`), and a large
+  family of **report/UI menu builders** (`dbi_report_buildUserAccountsReport`/`buildStaticSection`,
+  `dbi_ui_buildSelectionConfirmReport`/`buildTitleActionMenu`, `dbi_report_opContext_acquire`/`_dtor`).
+  (1 of 16 — `710050f610`, a 54 KB fn — failed to decompile and was skipped.)
 - **Batch 8/9 (32 app candidates, ~89 names):** continued draining the ranked app-candidate queue.
   Confirmed **new subsystems**: **ftp** (`dbi_ftp_cmdList` — LIST/NLST/STAT with RFC-959 reply codes),
   **network/http** (`dbi_net_httpClient_ctor` — wraps a **libcurl** easy handle; `[General] ValidateSSL`,

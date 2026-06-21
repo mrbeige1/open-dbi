@@ -18,7 +18,7 @@ if _args and _args[0].strip():
     csv_path = os.path.expanduser(_args[0].strip())
 else:
     csv_path = os.path.join(
-        os.path.expanduser("~/Documents/dbibackend_reversed/scripts/ghidra"),
+        os.path.expanduser("~/Documents/open-dbi/open-dbi/scripts/ghidra"),
         "names.csv")
 
 applied = 0

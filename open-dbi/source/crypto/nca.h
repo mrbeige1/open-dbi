@@ -5,9 +5,11 @@
 //   key area (0x40 @ 0x300) = AES-128-ECB with key_area_key[kaek_index][keygen]
 //   sections = AES-128-CTR with decrypted key_area[2], IV = ctr_high || (off>>4)
 //
-// STATUS: header field offsets are static_assert-checked; the full decrypt path is
-// implemented to spec but NOT yet validated against a real NCA (needs prod.keys +
-// a Meta NCA on hardware). Marked UNVERIFIED where end-to-end testing is required.
+// STATUS: header field offsets are static_assert-checked. The full decrypt path is
+// VALIDATED on hardware against a real base-game Meta NCA (keygen 0, kaekIndex 0,
+// standard crypto / no rights-id): header XTS -> key-area ECB unwrap -> section CTR
+// -> PFS0 -> a coherent CNMT extracted. Breadth across other keygens / kaek indices
+// and titlekey (rights-id) content is still being widened (M1 hardening).
 #pragma once
 #include <cstdint>
 #include <cstddef>
@@ -45,13 +47,13 @@ bool ncaParseHeader(const uint8_t* enc, size_t encLen, const Keyset& ks, NcaInfo
 
 // CTR-decrypt `len` bytes of section data read at absolute NCA offset `absOffset`
 // for section `sectionIdx`. `in`/`out` may alias. `absOffset` must be 16-aligned.
-// UNVERIFIED against a real NCA.
+// Validated on hardware (Meta NCA section 0, encType=Ctr).
 bool ncaDecryptSection(const NcaInfo& info, int sectionIdx, uint64_t absOffset,
                        const uint8_t* in, uint8_t* out, size_t len);
 
 // Source big enough to random-read an NCA (e.g. our io::ContentSource wrapper is
 // adapted by the caller). Extract the raw CNMT bytes from a Meta NCA's PFS0 section.
-// Returns the .cnmt contents, or empty on failure. UNVERIFIED end-to-end.
+// Returns the .cnmt contents, or empty on failure. Validated end-to-end on hardware.
 std::vector<uint8_t> ncaExtractCnmt(const uint8_t* nca, size_t ncaLen, const Keyset& ks);
 
 } // namespace dbi::crypto

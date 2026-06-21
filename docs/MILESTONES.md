@@ -23,13 +23,27 @@ Install a standard NSP from `sdmc:/install.nsp` into NCM and have it appear and 
 - **Exit criterion:** the `TEST-MATRIX.md` SD rows (base / update / DLC) all pass with a
   clean log and the title launches.
 
-## M1 — NCA crypto correctness across keygens
+## M1 — NCA crypto correctness across keygens 🟡 (first path hardware-validated)
 The decrypt path (header XTS tweak, key-area ECB unwrap, section CTR IV, PFS0 offset)
-is implemented to spec but parts are still marked `UNVERIFIED` in `source/crypto/nca.cpp`.
+is implemented to spec and now **validated on real hardware** for the first path.
 - **Goal:** confirm correct decrypt across master-key generations / `kaek` indices, both
   standard-crypto and titlekey (rights-id) content.
 - **Exit criterion:** dry-run reports the correct `titleId`/CNMT for NSPs spanning several
   keygens and rights-id / no-rights-id, with `CheckHash` passing on real installs.
+- **Validated (2026-06-19):** on-device decrypt of a real base-game Meta NCA — header XTS →
+  key-area ECB unwrap (keygen 0, kaekIndex 0, standard crypto / no rights-id) → section CTR →
+  PFS0 → a coherent CNMT (titleId `01d05aeff2ee0000`, type 0x80, 2 content records). SHA-256
+  (oneshot+stream) and CNMT hash-capture also PASS on-device. The `UNVERIFIED` markers in
+  `nca.cpp` are confirmed for this path.
+- **Remaining:** broaden across other keygens / kaek indices and titlekey (rights-id) content;
+  the per-NCA `CheckHash` line on real NSPs is the instrument for each new sample.
+- **In progress:** `CheckHash` is implemented — a clean-room SHA-256 (`source/crypto/sha256.*`,
+  host-validated vs FIPS 180-4 vectors) verifies each content NCA against the CNMT's recorded
+  hash (and the filename naming invariant). Dry-run runs the check read-only and reports
+  per-NCA PASS/FAIL; the installer aborts in the content-meta phase on a mismatch when
+  `[Install] CheckHash` is set (default on). `.ncz` content is hashed from its reconstructed
+  bytes (full NSZ verification lands with M3). The `UNVERIFIED` crypto markers are now exercised
+  end-to-end by this check — confirming them is the remaining on-hardware step.
 
 ## M2 — USB install robustness
 SD install works without USB; the `usb:ds` `BulkTransport` is the newer path.

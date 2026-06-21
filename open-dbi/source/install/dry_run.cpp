@@ -5,6 +5,8 @@
 #include "../fs/cnmt.h"
 #include "../crypto/nca.h"
 #include "../crypto/ncz.h"
+#include "../crypto/sha256.h"
+#include "../install/installer.h"   // parseContentId
 #include <cstring>
 #include <vector>
 #include <string>
@@ -45,6 +47,29 @@ const char* metaTypeName(uint8_t t) {
 const char* cnmtContentTypeName(uint8_t t) {
     static const char* names[] = {"Meta","Program","Data","Control","HtmlDoc","LegalInfo","DeltaFragment"};
     return (t < 7) ? names[t] : "?";
+}
+
+// Stream the SHA-256 of `size` bytes at `off` in 1 MiB reads (NCAs can be multi-GB,
+// so we never buffer the whole file). Returns false on a short read.
+bool sha256OfRange(io::ContentSource& src, uint64_t off, uint64_t size, uint8_t out[32]) {
+    constexpr size_t CHUNK = 0x100000;
+    std::vector<uint8_t> buf(CHUNK);
+    crypto::Sha256 h;
+    uint64_t done = 0;
+    while (done < size) {
+        size_t want = (size_t)(size - done < CHUNK ? size - done : CHUNK);
+        if (src.read(buf.data(), off + done, want) != want) return false;
+        h.update(buf.data(), want);
+        done += want;
+    }
+    h.finish(out);
+    return true;
+}
+
+void hex16(const uint8_t* b, char out[33]) {
+    static const char* H = "0123456789abcdef";
+    for (int i = 0; i < 16; ++i) { out[i*2] = H[b[i]>>4]; out[i*2+1] = H[b[i]&0xF]; }
+    out[32] = 0;
 }
 
 // Decode the NCA header of a .nca/.ncz entry and log its fields. `nczStart` is the
@@ -115,6 +140,8 @@ DryRunResult dryRunInstall(io::ContentSource& src, const crypto::Keyset* ks) {
     }
 
     // Pass 2: extract + parse the CNMT (needs keys) to report the meta target.
+    // Retained for Pass 3 so each content NCA can be checked against its CNMT hash.
+    std::vector<fs::CnmtContent> metaContents;
     for (const auto& e : pfs.entries()) {
         if (!endsWith(e.name, ".cnmt.nca")) continue;
         res.cnmtFound = true;
@@ -132,6 +159,7 @@ DryRunResult dryRunInstall(io::ContentSource& src, const crypto::Keyset* ks) {
         if (!cn.parse(cnmt.data(), cnmt.size())) { dbi::log::line("[dry-run] CNMT parse failed"); break; }
         res.metaType = cn.metaType;
         res.titleId  = cn.titleId;
+        metaContents = cn.contents;
         dbi::log::line("[dry-run] CNMT: titleId=%016llx version=%u type=%s contents=%zu",
                        (unsigned long long)cn.titleId, cn.version, metaTypeName(cn.metaType), cn.contents.size());
         for (size_t i = 0; i < cn.contents.size(); ++i)
@@ -140,6 +168,59 @@ DryRunResult dryRunInstall(io::ContentSource& src, const crypto::Keyset* ks) {
                            (unsigned long long)cn.contents[i].size);
         break;
     }
+
+    // Pass 3: CheckHash. Stream the SHA-256 of every .nca and verify it against two
+    // references: the NCA naming invariant (first 16 bytes of the digest == the
+    // content id in the filename, needs no keys) and, when the CNMT was decoded, the
+    // full 32-byte hash recorded for that content. Read-only; never writes.
+    res.hashChecked = true;
+    dbi::log::line("[dry-run] ==== CheckHash (SHA-256, read-only) ====");
+    for (const auto& e : pfs.entries()) {
+        if (endsWith(e.name, ".ncz")) {
+            ++res.hashSkipped;
+            dbi::log::line("[dry-run] HASH %s: skipped (NSZ reconstruction hashing is M3)", e.name.c_str());
+            continue;
+        }
+        if (!endsWith(e.name, ".nca")) continue;
+
+        uint8_t digest[32];
+        if (!sha256OfRange(src, e.offset, e.size, digest)) {
+            ++res.hashFail;
+            dbi::log::line("[dry-run] HASH %s: FAIL (short read while hashing)", e.name.c_str());
+            continue;
+        }
+
+        // Naming invariant: filename id == first 16 bytes of the digest.
+        ContentId fileId{};
+        bool haveId = parseContentId(e.name, fileId);
+        bool idMatch = haveId && std::memcmp(fileId.data(), digest, 16) == 0;
+
+        // CNMT cross-check (only when the CNMT was decoded and lists this id).
+        const fs::CnmtContent* ref = nullptr;
+        for (const auto& mc : metaContents)
+            if (haveId && std::memcmp(mc.id, fileId.data(), 16) == 0) { ref = &mc; break; }
+        bool cnmtMatch = ref && std::memcmp(ref->hash, digest, 32) == 0;
+
+        char got[33], want[33];
+        hex16(digest, got);
+        if (ref && !cnmtMatch) {
+            hex16(ref->hash, want);
+            ++res.hashFail;
+            dbi::log::line("[dry-run] HASH %s: FAIL cnmt-hash mismatch (got %s.. want %s..)",
+                           e.name.c_str(), got, want);
+        } else if (!idMatch) {
+            ++res.hashFail;
+            dbi::log::line("[dry-run] HASH %s: FAIL name/hash mismatch (sha256[0..15]=%s..)",
+                           e.name.c_str(), got);
+        } else {
+            ++res.hashPass;
+            dbi::log::line("[dry-run] HASH %s: PASS (%s%s)", e.name.c_str(),
+                           ref ? "cnmt+name" : "name", ref ? "" : "; no CNMT ref");
+        }
+    }
+    dbi::log::line("[dry-run] CheckHash: %d pass, %d fail, %d skipped%s",
+                   res.hashPass, res.hashFail, res.hashSkipped,
+                   res.keysAvailable ? "" : " (no prod.keys: name-only check)");
 
     // Planned-install summary.
     dbi::log::line("[dry-run] PLAN: would write %d NCA(s), import %d ticket(s) (%d cert), "

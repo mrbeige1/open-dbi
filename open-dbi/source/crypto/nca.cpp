@@ -55,7 +55,8 @@ bool ncaDecryptSection(const NcaInfo& info, int sectionIdx, uint64_t absOffset,
     if (encType == 1) { std::memmove(out, in, len); return true; }      // unencrypted
     if (encType != 3) return false;                                      // XTS/BKTR not handled yet
     // Section CTR: high 8 bytes from FS header secure value @ +0x140 (big-endian
-    // as stored), low 8 bytes = (absOffset >> 4) big-endian.  UNVERIFIED.
+    // as stored), low 8 bytes = (absOffset >> 4) big-endian.  Validated on hardware:
+    // correctly decrypts section 0 of a real Meta NCA (keygen 0, kaekIndex 0).
     uint8_t ctr[16];
     const uint8_t* sv = info.fsHeader[sectionIdx] + 0x140;
     for (int i=0;i<8;i++) ctr[i] = sv[7-i];
@@ -72,7 +73,8 @@ std::vector<uint8_t> ncaExtractCnmt(const uint8_t* nca, size_t ncaLen, const Key
     if (!ncaParseHeader(nca, ncaLen, ks, info)) return empty;
     if (info.contentType != NcaContentType::Meta) return empty;
     // Meta NCA: the CNMT lives in section 0 (a PFS0). Section data starts at
-    // sections[0].start_block * 0x200.  UNVERIFIED against a real NCA.
+    // sections[0].start_block * 0x200.  Validated on hardware: yields a coherent
+    // CNMT (correct titleId / type / content records) from a real base-game Meta NCA.
     uint64_t secOff = (uint64_t)info.sections[0].start_block * 0x200;
     uint64_t secEnd = (uint64_t)info.sections[0].end_block   * 0x200;
     if (secOff >= ncaLen || secEnd <= secOff || secEnd > ncaLen) return empty;

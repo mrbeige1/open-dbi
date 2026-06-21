@@ -9,9 +9,9 @@ Quantitative state of the reconstruction. Update as phases advance.
 | Library — FID strict match | 1,182 | 12.6% | devkitA64 FidDb (libnx/libc/libstdc++/libsupc++/libm), 751 uniquely named |
 | Library — string-only hint | 824 | 8.8% | `ExportContext.py` keyword heuristic (libstdc++ etc.) |
 | **Library subtotal** | **2,006** | **21.3%** | |
-| App — recovered & named (`dbi_*`) | 150 | 1.6% | Phase 3 decompile→agent pipeline |
-| Library named (`lib_*` + libnx/std) | 815 | 8.7% | FID + agent-confirmed |
-| **Still `FUN_*` (unknown)** | **8,388** | **89.2%** | version-drifted library + obfuscated-string app code |
+| App — recovered & named (`dbi_*`) | 326 | 3.5% | Phase 3 decompile→agent pipeline |
+| Library named (`lib_*` + libnx/std) | 916 | 9.7% | FID + agent-confirmed |
+| **Still `FUN_*` (unknown)** | **8,098** | **86.1%** | version-drifted library + obfuscated-string app code |
 
 > 965 named. **Install pipeline mapped** end-to-end: `dbi_install_run` (5-phase) + `parseContainer`
 > (NSP=PFS0 / XCI=HFS0 → MetaKey RB-tree + content vector) + `resolveContent` (validate
@@ -43,6 +43,49 @@ recovery queue. Batch 2 recovered the top 4; ~712 remain (plus 2 to redo after a
   (confirms the **QR-code access point** the README omitted), `dbi_forwarder_buildNsp` (new **forwarder**
   subsystem — builds shortcut NSPs with JPEG icons), `dbi_pdm_buildPlayEventReport` (new **pdm** subsystem
   — the Activity Log / play-history via `pdmqry*`). +21 callee names applied.
+- **Batch 10 (15 app candidates, 45 names):** more queue drain. **ftp** internals
+  (`dbi_ftp_dataConnClose`, `dbi_ftp_formatAddrLine`), **mtp** (`dbi_mtp_assertMatchingTransactionId`),
+  **network** (`dbi_net_setNonBlocking`), **config** nested get/set/remove
+  (`dbi_config_getNestedString`/`setNested3`/`removeEntryItem`, `dbi_config_importFromDir`), and a large
+  family of **report/UI menu builders** (`dbi_report_buildUserAccountsReport`/`buildStaticSection`,
+  `dbi_ui_buildSelectionConfirmReport`/`buildTitleActionMenu`, `dbi_report_opContext_acquire`/`_dtor`).
+  (1 of 16 — `710050f610`, a 54 KB fn — failed to decompile and was skipped.)
+- **Batch 8/9 (32 app candidates, ~89 names):** continued draining the ranked app-candidate queue.
+  Confirmed **new subsystems**: **ftp** (`dbi_ftp_cmdList` — LIST/NLST/STAT with RFC-959 reply codes),
+  **network/http** (`dbi_net_httpClient_ctor` — wraps a **libcurl** easy handle; `[General] ValidateSSL`,
+  HTTP auth), and the **UI settings menu** (`dbi_ui_buildConfigBoolRow`, `dbi_ui_buildConfigThemeRow`,
+  `dbi_ui_titleListView_construct`, file-browser `drawStatusBar`/`drawColumn`/`onSelect`). Plus more
+  install glue (`dbi_install_registerContentFile`, `_resolveMetaContents`, `_buildContentFileViews`,
+  `_confirmFreeSpaceAndPrompt`, `_registerContentPathById`, `_titleHasContentFiles`), saves
+  (`dbi_saves_finalizeSaveEntry`, `_promptResizeSaveData`, `_addSaveBrowseEntry`), dumps
+  (`dbi_dump_recryptContentHashed` — NCA header XTS re-encrypt + dual SHA-256; `dbi_dump_buildTicketNsp`),
+  pfs0 (`dbi_pfs0_buildPartitionHeader`, `dbi_install_buildNcaSections`), and a family of report builders
+  (`dbi_report_buildIdListReport`/`buildSummaryReport`/`dumpContentRecord`/`appendOkLine`).
+- **Batch 7 (14 of top app candidates, 62 names):** large high-score app functions, mostly the
+  **install / diagnostics-report cluster**. `dbi_report_buildCleanupReport` @`71000ce3b0` (the top-level
+  "Cleanup" debug-report builder; orchestrates ~12 flag-gated sections), with section handlers
+  `dbi_saves_reportBackupTitles`, `dbi_report_appendNandAppLine`, `dbi_install_reportContentRecordDiff`,
+  `dbi_install_reportContainerContents`, `dbi_install_reportSourceContainers`; install glue
+  `dbi_install_prepareTitleEntry`, `dbi_install_commitContentEntry`, `dbi_install_registerContentFiles`,
+  `dbi_pfs0_addHashedContentFile`; saves `dbi_saves_buildSaveInfoReport`, `dbi_saves_resizeSaveFileAndReport`;
+  and the first **UI** anchors `dbi_ui_fileBrowser_onSelect`, `dbi_ui_appList_rebuild`. (4 more in this
+  wave were decompiled but deferred when the agent session limit hit: 71001b2bd0, 710015f9e0, 710011f780,
+  710011c110.)
+- **Batch 5/6 (9 fns, 33 names):** **es ticket import** + **app-side archive glue**.
+  `dbi_ticket_getRightsId`, `dbi_ticket_wipeSignature` (confirms `[Install] WipeSignature`),
+  `dbi_install_enqueueContentMetaEntry` (stages `.tik`/`.cert`/`.nca`); `dbi_7z_extract_named_entry` /
+  `dbi_archive_list_entries` driving libarchive — which named ~10 real API entry points
+  (`archive_read_new`, `archive_read_open_filename`, `archive_read_next_header`, `archive_read_close/free`,
+  `archive_entry_pathname/size/filetype`). The app-side codec call uses libarchive's C++ wrapper
+  (`lib_archiveCpp_statEntry`/`listEntries`); the NSZ/XCZ extension router is a still-unknown virtual caller.
+- **Batch 4 (12 targets + 40 callees = 52 names):** the **NSZ/XCZ + archive decompression subsystem**,
+  identified as DBI's bundled **libarchive 7-Zip reader**. `lib_archive_read_support_format_7zip`
+  (registration), `lib_archive_7z_read_header`, `lib_7z_decode_block` (multi-codec dispatch) with per-codec
+  wrappers `lib_zstd_decompressStream` (NSZ/XCZ, 7z method 0x4f71101), `lib_lzma_decodeStep`,
+  `lib_bzip2_decompress`, `lib_inflate`, PPMd, `lib_7z_bcj2_decode` + BCJ branch filters; `lib_7z_setup_coder`
+  (method-ID→codec table). DBI's own glue: `dbi_nca_decompressBlock` (bounded-output NCZ driver) and the
+  separate HTTP path `dbi_net_decodeContentEncoding` (gzip/deflate). Found by string-pivot
+  ("Zstd decompression failed", 7z method-ID dispatch) — the cluster is reached via an indirect codec table.
 - **Batch 3 (11 fns):** `dbi_app_buildApplicationDetails`, `dbi_pdm_buildActivityLogReport`,
   `dbi_mtp_responderRun`, `dbi_fs_registerSpecialEntries`, `dbi_ui_buildDirListingRows`,
   `dbi_saves_copySaveExtraData`, `dbi_config_loadAndApply`, `dbi_saves_extendSaveFs`,

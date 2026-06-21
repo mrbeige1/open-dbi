@@ -17,6 +17,7 @@
 #include "fs/pfs0.h"
 #include "install/installer.h"
 #include "crypto/aes.h"
+#include "crypto/sha256.h"
 #include "fs/cnmt.h"
 #include "usb/usbds_transport.h"
 #include "usb/dbi0_client.h"
@@ -27,6 +28,7 @@
 #include "install/dry_run.h"
 #include "install/report.h"
 #include "log/log.h"
+#include "ui/console_menu.h"
 #include "build_version.h"
 
 using namespace dbi;
@@ -130,6 +132,18 @@ static void selftest() {
                std::memcmp(enc,ct,16)==0?"PASS":"FAIL", std::memcmp(dec,pt,16)==0?"PASS":"FAIL");
     }
 
+    // SHA-256 correctness vs FIPS 180-4 "abc" vector (one-shot + byte-by-byte streaming)
+    {
+        const uint8_t want[32] = {
+            0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,
+            0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
+        uint8_t got[32]; dbi::crypto::sha256("abc", 3, got);
+        uint8_t gotS[32]; dbi::crypto::Sha256 s;
+        const char* m = "abc"; for (int i=0;i<3;i++) s.update(m+i, 1); s.finish(gotS);
+        printf("[crypto] SHA-256 FIPS-180 oneshot=%s stream=%s\n",
+               std::memcmp(got,want,32)==0?"PASS":"FAIL", std::memcmp(gotS,want,32)==0?"PASS":"FAIL");
+    }
+
     // CNMT parser on a hand-built blob (no crypto needed)
     {
         std::vector<uint8_t> c(0x20 + 0x38, 0);
@@ -139,12 +153,18 @@ static void selftest() {
         c[0x0C]=(uint8_t)dbi::fs::ContentMetaType::Application;
         c[0x0E]=0; c[0x0F]=0;                 // ext header size 0
         c[0x10]=1;                            // content count 1
-        // one content record at 0x20: 0x20 hash + info{id,size(6),type}
-        c[0x20+0x20+22]=1;                    // content type = Program
+        // one content record at 0x20: 0x20 hash + info{id(0x10),size(6),type}
+        for (int i=0;i<32;i++) c[0x20+i]=(uint8_t)(0xA0+i);  // record's SHA-256 hash
+        c[0x40+0]=0xB0;                       // content id[0] (info starts at +0x40)
+        c[0x40+22]=1;                         // content type = Program
         dbi::fs::Cnmt cn;
         bool ok=cn.parse(c.data(), c.size());
-        printf("[cnmt] parse=%d titleId=%016llx ver=%u type=0x%02x contents=%zu\n",
-               ok, (unsigned long long)cn.titleId, cn.version, cn.metaType, cn.contents.size());
+        bool hashCap = ok && cn.contents.size()==1 &&
+                       cn.contents[0].hash[0]==0xA0 && cn.contents[0].hash[31]==0xBF &&
+                       cn.contents[0].id[0]==0xB0;
+        printf("[cnmt] parse=%d titleId=%016llx ver=%u type=0x%02x contents=%zu hashCapture=%s\n",
+               ok, (unsigned long long)cn.titleId, cn.version, cn.metaType, cn.contents.size(),
+               hashCap?"PASS":"FAIL");
     }
 
     // install state machine over an in-memory NSP
@@ -248,6 +268,18 @@ static void ncaDecryptTest() {
     printf("[nca] done.\n");
 }
 
+// CheckHash setting: read [Install] CheckHash from the app's config on SD, defaulting
+// ON (integrity-first). Absent file -> verification stays enabled.
+static bool loadCheckHash() {
+    FILE* f = fopen("sdmc:/switch/open-dbi/open-dbi.config", "rb");
+    if (!f) return true;
+    std::string text; char buf[1024]; size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) text.append(buf, n);
+    fclose(f);
+    dbi::config::Config cfg; cfg.parse(text);
+    return cfg.getBool("Install", "CheckHash", true);
+}
+
 // REAL install from sdmc:/install.nsp to SD via real ncm/es. WRITES to ncm storage.
 static void realInstall() {
     printf("\n[INSTALL] *** WRITES to ncm *** sdmc:/install.nsp -> SD\n"); consoleUpdate(NULL);
@@ -259,7 +291,8 @@ static void realInstall() {
     dbi::install::Installer inst(be);
     LogObserver obs; inst.setObserver(&obs);
     inst.setKeyset(&ks);
-    dbi::log::line("[INSTALL] real install sdmc:/install.nsp -> SD (writes ncm)");
+    bool checkHash = loadCheckHash(); inst.setVerifyHashes(checkHash);
+    dbi::log::line("[INSTALL] real install sdmc:/install.nsp -> SD (writes ncm) CheckHash=%d", (int)checkHash);
     auto r = inst.installNsp(nsp, dbi::install::StorageId::SdCard);
     dbi::log::line("[INSTALL] ok=%d ncas=%d tickets=%d err=%s",
                    r.ok, r.ncasWritten, r.ticketsImported, r.error.c_str());
@@ -290,7 +323,8 @@ static void usbInstall() {
     dbi::install::Installer inst(be);
     LogObserver obs; inst.setObserver(&obs);
     inst.setKeyset(&ks);
-    dbi::log::line("[usb-install] installing over USB: %s", nsp.c_str());
+    bool checkHash = loadCheckHash(); inst.setVerifyHashes(checkHash);
+    dbi::log::line("[usb-install] installing over USB: %s CheckHash=%d", nsp.c_str(), (int)checkHash);
     auto r = inst.installNsp(src, dbi::install::StorageId::SdCard);
     dbi::log::line("[usb-install] ok=%d ncas=%d tickets=%d err=%s",
                    r.ok, r.ncasWritten, r.ticketsImported, r.error.c_str());
@@ -318,34 +352,52 @@ static void makeReport() {
     dbi::install::writeDebugReport(g_lastOp, nsp.valid() ? &nsp : nullptr, haveKeys ? &ks : nullptr);
 }
 
+// --- menu action wrappers (stateless free functions -> dbi::ui::Action) ---
+using dbi::ui::ActionResult;
+static ActionResult actRealInstall()   { realInstall();   return ActionResult::Return; }
+static ActionResult actUsbInstall()    { usbInstall();    return ActionResult::Return; }
+static ActionResult actDryRun()        { dryRunFromSd();  return ActionResult::Return; }
+static ActionResult actNcaDecrypt()    { ncaDecryptTest(); return ActionResult::Return; }
+static ActionResult actUsbReceive()    { usbReceiveTest(); return ActionResult::Return; }
+static ActionResult actMakeReport()    { makeReport();    return ActionResult::Return; }
+static ActionResult actSelftest()      { selftest();      return ActionResult::Return; }
+
 int main(int, char**) {
     consoleInit(NULL);
     dbi::log::init();
-    printf("Open-DBI self-test (clean-room modules)  [%s]\n\n", OPEN_DBI_VERSION);
+    printf("Open-DBI boot self-test (clean-room modules)  [%s]\n\n", OPEN_DBI_VERSION);
     selftest();
-    printf("\nPress A = USB transfer test (read-only, needs dbibackend)\n"
-           "Press B = NCA decrypt test (read-only)\n"
-           "Press Up = DRY-RUN install of sdmc:/install.nsp (read-only, safe)\n"
-           "Press Down = Create debug report (sdmc:/switch/open-dbi/logs/)\n"
-           "Hold L+R+X = REAL install from sdmc:/install.nsp (writes ncm!)\n"
-           "Hold L+R+Y = REAL install over USB from dbibackend (writes ncm!)\n"
-           "Press + to exit.\n");
+
+    // Pause on the boot results, then enter the menu. The shell owns input from here.
+    PadState bootPad;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
-    PadState pad; padInitializeDefault(&pad);
-    while (appletMainLoop()) {
-        padUpdate(&pad);
-        u64 down = padGetButtonsDown(&pad);
-        u64 held = padGetButtons(&pad);
-        bool lr = (held & HidNpadButton_L) && (held & HidNpadButton_R);
-        if (down & HidNpadButton_Plus) break;
-        if (down & HidNpadButton_A) { usbReceiveTest();  printf("\nPress + to exit.\n"); }
-        if (down & HidNpadButton_B) { ncaDecryptTest();  printf("\nPress + to exit.\n"); }
-        if (down & HidNpadButton_Up)   { dryRunFromSd();  printf("\nPress + to exit.\n"); }
-        if (down & HidNpadButton_Down) { makeReport();    printf("\nPress + to exit.\n"); }
-        if ((down & HidNpadButton_X) && lr) { realInstall(); printf("\nPress + to exit.\n"); }
-        if ((down & HidNpadButton_Y) && lr) { usbInstall();  printf("\nPress + to exit.\n"); }
-        consoleUpdate(NULL);
-    }
+    padInitializeDefault(&bootPad);
+    dbi::ui::waitForKey(bootPad, "\nSelf-test done. Press A/B for the menu.");
+
+    // Menu tree. Named statics: long-lived, so submenu pointers never dangle.
+    using namespace dbi::ui;
+    static Menu installMenu{ "Install", {
+        { "Install from SD (sdmc:/install.nsp)", actRealInstall, nullptr, true, "Writes ncm storage" },
+        { "Install over USB (dbibackend)",       actUsbInstall,  nullptr, true, "Writes ncm storage" },
+    }, 0 };
+    static Menu toolsMenu{ "Tools", {
+        { "Dry-run install (read-only)",   actDryRun },
+        { "NCA decrypt test (read-only)",  actNcaDecrypt },
+        { "USB transfer test (read-only)", actUsbReceive,  nullptr, false, "Needs dbibackend on PC" },
+        { "Write debug report",            actMakeReport,  nullptr, false, "-> sdmc:/switch/open-dbi/logs/" },
+    }, 0 };
+    static Menu diagMenu{ "Diagnostics", {
+        { "Run self-test", actSelftest },
+    }, 0 };
+    static Menu mainMenu{ "Main", {
+        { "Install",     nullptr, &installMenu },
+        { "Tools",       nullptr, &toolsMenu },
+        { "Diagnostics", nullptr, &diagMenu },
+    }, 0 };
+
+    MenuShell shell(&mainMenu);
+    shell.run();
+
     consoleExit(NULL);
     return 0;
 }

@@ -8,7 +8,7 @@ GHIDRA="$HOME/switch-re/ghidra_11.0_PUBLIC"
 PROJ_LOC="$HOME"          # project location (where DBI.gpr/.rep live)
 PROJ_NAME="DBI"
 PROGRAM="DBI.nro"         # program name inside the project
-SCRIPTS="$HOME/Documents/dbibackend_reversed/scripts/ghidra"
+SCRIPTS="$HOME/Documents/open-dbi/open-dbi/scripts/ghidra"
 
 "$GHIDRA/support/analyzeHeadless" "$PROJ_LOC" "$PROJ_NAME" \
   -process "$PROGRAM" \

@@ -15,7 +15,8 @@ enum class ContentMetaType : uint8_t {
 };
 
 struct CnmtContent {
-    uint8_t  id[16];
+    uint8_t  hash[32]; // SHA-256 of the content NCA (CheckHash reference)
+    uint8_t  id[16];   // = first 16 bytes of `hash`; also the NCA filename
     uint64_t size;     // 6-byte field, zero-extended
     uint8_t  type;     // 0=Meta,1=Program,2=Data,3=Control,4=HtmlDoc,5=LegalInfo,6=DeltaFragment
 };
@@ -40,8 +41,9 @@ struct Cnmt {
         for (uint16_t i=0;i<count;i++){
             size_t rec = pos + (size_t)i*0x38;
             if (rec + 0x38 > len) break;
-            const uint8_t* info = d + rec + 0x20;   // skip 0x20 SHA-256 hash
+            const uint8_t* info = d + rec + 0x20;   // record = 0x20 SHA-256 hash + 0x18 info
             CnmtContent c{};
+            std::memcpy(c.hash, d + rec, 32);        // the content NCA's SHA-256
             std::memcpy(c.id, info, 16);
             uint64_t sz=0; for(int b=0;b<6;b++) sz|=(uint64_t)info[16+b]<<(8*b);
             c.size = sz;

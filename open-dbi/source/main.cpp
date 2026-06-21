@@ -28,6 +28,7 @@
 #include "install/dry_run.h"
 #include "install/report.h"
 #include "log/log.h"
+#include "ui/console_menu.h"
 #include "build_version.h"
 
 using namespace dbi;
@@ -351,34 +352,52 @@ static void makeReport() {
     dbi::install::writeDebugReport(g_lastOp, nsp.valid() ? &nsp : nullptr, haveKeys ? &ks : nullptr);
 }
 
+// --- menu action wrappers (stateless free functions -> dbi::ui::Action) ---
+using dbi::ui::ActionResult;
+static ActionResult actRealInstall()   { realInstall();   return ActionResult::Return; }
+static ActionResult actUsbInstall()    { usbInstall();    return ActionResult::Return; }
+static ActionResult actDryRun()        { dryRunFromSd();  return ActionResult::Return; }
+static ActionResult actNcaDecrypt()    { ncaDecryptTest(); return ActionResult::Return; }
+static ActionResult actUsbReceive()    { usbReceiveTest(); return ActionResult::Return; }
+static ActionResult actMakeReport()    { makeReport();    return ActionResult::Return; }
+static ActionResult actSelftest()      { selftest();      return ActionResult::Return; }
+
 int main(int, char**) {
     consoleInit(NULL);
     dbi::log::init();
-    printf("Open-DBI self-test (clean-room modules)  [%s]\n\n", OPEN_DBI_VERSION);
+    printf("Open-DBI boot self-test (clean-room modules)  [%s]\n\n", OPEN_DBI_VERSION);
     selftest();
-    printf("\nPress A = USB transfer test (read-only, needs dbibackend)\n"
-           "Press B = NCA decrypt test (read-only)\n"
-           "Press Up = DRY-RUN install of sdmc:/install.nsp (read-only, safe)\n"
-           "Press Down = Create debug report (sdmc:/switch/open-dbi/logs/)\n"
-           "Hold L+R+X = REAL install from sdmc:/install.nsp (writes ncm!)\n"
-           "Hold L+R+Y = REAL install over USB from dbibackend (writes ncm!)\n"
-           "Press + to exit.\n");
+
+    // Pause on the boot results, then enter the menu. The shell owns input from here.
+    PadState bootPad;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
-    PadState pad; padInitializeDefault(&pad);
-    while (appletMainLoop()) {
-        padUpdate(&pad);
-        u64 down = padGetButtonsDown(&pad);
-        u64 held = padGetButtons(&pad);
-        bool lr = (held & HidNpadButton_L) && (held & HidNpadButton_R);
-        if (down & HidNpadButton_Plus) break;
-        if (down & HidNpadButton_A) { usbReceiveTest();  printf("\nPress + to exit.\n"); }
-        if (down & HidNpadButton_B) { ncaDecryptTest();  printf("\nPress + to exit.\n"); }
-        if (down & HidNpadButton_Up)   { dryRunFromSd();  printf("\nPress + to exit.\n"); }
-        if (down & HidNpadButton_Down) { makeReport();    printf("\nPress + to exit.\n"); }
-        if ((down & HidNpadButton_X) && lr) { realInstall(); printf("\nPress + to exit.\n"); }
-        if ((down & HidNpadButton_Y) && lr) { usbInstall();  printf("\nPress + to exit.\n"); }
-        consoleUpdate(NULL);
-    }
+    padInitializeDefault(&bootPad);
+    dbi::ui::waitForKey(bootPad, "\nSelf-test done. Press A/B for the menu.");
+
+    // Menu tree. Named statics: long-lived, so submenu pointers never dangle.
+    using namespace dbi::ui;
+    static Menu installMenu{ "Install", {
+        { "Install from SD (sdmc:/install.nsp)", actRealInstall, nullptr, true, "Writes ncm storage" },
+        { "Install over USB (dbibackend)",       actUsbInstall,  nullptr, true, "Writes ncm storage" },
+    }, 0 };
+    static Menu toolsMenu{ "Tools", {
+        { "Dry-run install (read-only)",   actDryRun },
+        { "NCA decrypt test (read-only)",  actNcaDecrypt },
+        { "USB transfer test (read-only)", actUsbReceive,  nullptr, false, "Needs dbibackend on PC" },
+        { "Write debug report",            actMakeReport,  nullptr, false, "-> sdmc:/switch/open-dbi/logs/" },
+    }, 0 };
+    static Menu diagMenu{ "Diagnostics", {
+        { "Run self-test", actSelftest },
+    }, 0 };
+    static Menu mainMenu{ "Main", {
+        { "Install",     nullptr, &installMenu },
+        { "Tools",       nullptr, &toolsMenu },
+        { "Diagnostics", nullptr, &diagMenu },
+    }, 0 };
+
+    MenuShell shell(&mainMenu);
+    shell.run();
+
     consoleExit(NULL);
     return 0;
 }

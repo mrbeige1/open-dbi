@@ -43,7 +43,7 @@ APP_VERSION	:=	0.0.1
 
 TARGET		:=	open-dbi
 BUILD		:=	build
-SOURCES		:=	source source/proto source/config source/saves source/io source/usb source/install source/fs source/crypto source/log
+SOURCES		:=	source source/proto source/config source/saves source/io source/usb source/install source/fs source/crypto source/log source/ui
 DATA		:=	data
 INCLUDES	:=	include
 #ROMFS	:=	romfs
